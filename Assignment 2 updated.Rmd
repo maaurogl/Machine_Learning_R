@@ -1,0 +1,209 @@
+Loading the data
+```{r}
+library(readr)
+data <- read_csv("Data Sets/chowdary.csv")
+data
+```
+ 
+Creating a data set with only the numbers
+```{r}
+num_data <- data[,3:184]
+head(num_data)
+```
+Standardizing the data
+```{r}
+library(dplyr)
+std_data <- num_data %>% mutate_all(~(scale(.) %>% as.vector))
+std_data
+
+```
+
+
+
+Calculating the within group sum of squares to determine an appropriate value for k:
+```{r}
+set.seed(123) #Setting seed so that we always compute the same values
+WSS <- rep(0,10)
+for (i in 1:10){
+  WSS[i] <- sum(kmeans(std_data, centers=i,nstart = 20)$withinss) #nstart is the number of times we try with new centers
+}
+WSS
+```
+Ploting k against WSS to see if we can find a good k value:
+```{r}
+plot(WSS, type="l")
+```
+By looking at the plot, we can see that there is a kink in the curve at k=2,and k=3.
+
+
+
+Printing the tables for k=2:
+```{r}
+library(ggplot2)
+library(factoextra)
+
+set.seed(123) #Setting seed so that we always compute the same values
+cl1 <- kmeans(std_data, centers = 2,nstart = 20) 
+table(cl1$cluster)
+
+
+```
+Plot:
+```{r}
+fviz_cluster(cl1, std_data, ellipse.type = "norm", pointsize = 1,
+             labelsize = 7, ggtheme = theme_grey())
+```
+
+Calculating the silhouette index for k=2:
+```{r}
+library("cluster")
+
+dist_mat       <- dist(std_data)^2
+silhouette_cl1 <- silhouette(cl1$cluster, dist_mat)
+
+summary(silhouette_cl1)
+```
+
+
+```{r}
+plot(silhouette_cl1, col=1:2) #change col range depending on how large k is
+```
+Pretty good, but still not great since we know that B and C tumor groups are equal sized.
+
+
+Printing the tables for k=3:
+```{r}
+set.seed(123) #Setting seed so that we always compute the same values
+cl2 <- kmeans(std_data, centers = 3,nstart = 20)
+table(cl2$cluster)
+```
+
+Plot:
+```{r}
+fviz_cluster(cl2, std_data, ellipse.type = "norm", pointsize = 1,
+            labelsize = 7, ggtheme = theme_grey())
+```
+
+```{r}
+dist_mat2       <- dist(std_data)^2
+silhouette_cl2 <- silhouette(cl2$cluster, dist_mat2)
+
+summary(silhouette_cl2)
+```
+
+
+```{r}
+plot(silhouette_cl2, col=1:3)
+```
+Clearly 2 is much better
+
+
+
+Trying to cluster better with tSNE:
+```{r}
+set.seed(123)
+B <- sample(1:62, size = 62)
+C <- sample(63:104, size = 42)
+
+samp <- std_data[c(B,C),]
+
+```
+
+
+```{r}
+library(Rtsne)
+
+set.seed(123)
+acidsamp_tsne <- Rtsne(samp, perplexity = 20)
+
+
+plot(acidsamp_tsne$Y, col = cols, pch = cols, xlab = "tSNE1", ylab = "tSNE2")
+legend("topleft", 
+       legend = unique(data[c(B,C), 2]),
+       col = 1:2, pch = 1:2)
+```
+
+```{r}
+library(factoextra)
+library(ggplot2)
+
+set.seed(123) #Setting seed so that we always compute the same values
+cl <- kmeans(acidsamp_tsne$Y, centers = 2,nstart = 20) 
+table(cl$cluster)
+```
+
+```{r}
+fviz_cluster(cl, std_data, ellipse.type = "norm", pointsize = 1,
+             labelsize = 7, ggtheme = theme_grey())
+```
+
+Removing outliers
+```{r}
+fviz_cluster(cl1, std_data, ellipse.type = "norm", pointsize = 1,
+             labelsize = 7, ggtheme = theme_grey())
+```
+We can see that the outliers are points 71-76
+```{r}
+library(tidyverse)
+no_outliers <- std_data %>%  filter(!row_number() %in% c(71, 72, 73, 74, 75, 76))
+no_outliers
+```
+
+```{r}
+set.seed(123) #Setting seed so that we always compute the same values
+```
+
+
+```{r}
+cl4 <- kmeans(no_outliers, centers = 2,nstart = 20) 
+table(cl4$cluster)
+```
+
+```{r}
+fviz_cluster(cl4, no_outliers, ellipse.type = "norm", pointsize = 1,
+             labelsize = 7, ggtheme = theme_grey())
+```
+
+```{r}
+dist_mat4       <- dist(no_outliers)^2
+silhouette_cl4 <- silhouette(cl4$cluster, dist_mat4)
+
+summary(silhouette_cl4)
+```
+
+```{r}
+plot(silhouette_cl4, col=1:2)
+```
+
+```{r}
+#1/2 train + 1/2 test
+library(class)
+index_train <- c(1:25, 1:24 + 74)
+index_test <- c(26:74)
+
+train <- no_outliers[index_train,]
+test <- no_outliers[index_test,]
+
+no_outliers_data <- data %>%  filter(!row_number() %in% c(71, 72, 73, 74, 75, 76))
+
+kmax  <- 50
+k     <- 1:kmax
+p     <- rep(0, kmax)
+ntest <- nrow(test)
+
+k_summary <- cbind(k, p)
+colnames(k_summary) <- c("k","% misclassified")
+
+for (i in 1:kmax){
+  result <- knn(train, test, cl = no_outliers_data[index_train,2], k = i)
+  class_agree     <- table(result, no_outliers_data[index_test,2])
+  sum_agree       <- sum(diag(class_agree))
+  k_summary[i, 2] <- (ntest - sum_agree) / ntest
+}
+
+best = min(k_summary[,2])
+
+plot(k_summary, main = "% misclassified knn", 
+     xlab = "k", ylab = "% missclassified", type = "line")
+```
+
